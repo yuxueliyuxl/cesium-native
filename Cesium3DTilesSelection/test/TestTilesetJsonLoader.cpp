@@ -111,13 +111,19 @@ TileLoadResult loadTileContent(
 
 Cesium3DTilesSelection::TilesetContentLoaderResult<TilesetJsonLoader>
 Cesium3DTilesSelection::createTilesetJsonLoader(
-    const std::filesystem::path& tilesetPath) {
+    const std::filesystem::path& tilesetPath,
+    bool ignoreTransform) {
   std::string tilesetPathStr = tilesetPath.string();
   auto pAccessor = std::make_shared<SimpleAssetAccessor>(
       std::map<std::string, std::shared_ptr<SimpleAssetRequest>>());
   auto externals = createMockJsonTilesetExternals(tilesetPathStr, pAccessor);
   auto loaderResultFuture =
-      TilesetJsonLoader::createLoader(externals, tilesetPathStr, {});
+      TilesetJsonLoader::createLoader(
+          externals,
+          tilesetPathStr,
+          {},
+          CesiumGeospatial::Ellipsoid::WGS84,
+          ignoreTransform);
   externals.asyncSystem.dispatchMainThreadTasks();
 
   return loaderResultFuture.wait();
@@ -388,6 +394,25 @@ TEST_CASE("Test creating tileset json loader") {
     CHECK(loaderResult.pLoader->getUpAxis() == CesiumGeometry::Axis::Y);
   }
 
+  SUBCASE("Ignore tile transforms") {
+    auto loaderResult = createTilesetJsonLoader(
+        testDataPath / "MultipleKindsOfTilesets" /
+            "ScaleGeometricErrorTileset.json",
+        true);
+
+    CHECK(!loaderResult.errors.hasErrors());
+    REQUIRE(loaderResult.pRootTile);
+    REQUIRE(loaderResult.pRootTile->getChildren().size() == 1);
+    const Tile& rootTile = loaderResult.pRootTile->getChildren()[0];
+    CHECK(rootTile.getTransform() == glm::dmat4(1.0));
+    CHECK(rootTile.getGeometricError() == Approx(70.0));
+    REQUIRE(rootTile.getChildren().size() == 4);
+    for (const Tile& child : rootTile.getChildren()) {
+      CHECK(child.getTransform() == glm::dmat4(1.0));
+      CHECK(child.getGeometricError() == Approx(5.0));
+    }
+  }
+
   SUBCASE("Tileset with empty tile") {
     std::shared_ptr<SimpleAssetAccessor> pMockAssetAccessor =
         std::make_shared<SimpleAssetAccessor>(
@@ -585,6 +610,33 @@ TEST_CASE("Test loading individual tile of tileset json") {
       CHECK(std::holds_alternative<CesiumGeospatial::BoundingRegion>(
           child.getBoundingVolume()));
     }
+  }
+
+  SUBCASE("Propagate ignore transform to external tilesets") {
+    auto loaderResult = createTilesetJsonLoader(
+        testDataPath / "AddTileset" / "tileset.json",
+        true);
+
+    REQUIRE(loaderResult.pRootTile);
+    REQUIRE(loaderResult.pRootTile->getChildren().size() == 1);
+    Tile& rootTile = loaderResult.pRootTile->getChildren()[0];
+    const auto& tileID = std::get<std::string>(rootTile.getTileID());
+
+    auto tileLoadResult = loadTileContent(
+        testDataPath / "AddTileset" / tileID,
+        *loaderResult.pLoader,
+        rootTile);
+    REQUIRE(tileLoadResult.tileInitializer);
+    rootTile.getContent().setContentKind(
+        std::make_unique<TileExternalContent>(
+            std::get<TileExternalContent>(tileLoadResult.contentKind)));
+    tileLoadResult.tileInitializer(rootTile);
+
+    REQUIRE(rootTile.getChildren().size() == 1);
+    const auto* pExternalLoader = dynamic_cast<const TilesetJsonLoader*>(
+        rootTile.getChildren()[0].getLoader());
+    REQUIRE(pExternalLoader);
+    CHECK(pExternalLoader->getIgnoreTransform());
   }
 
   SUBCASE("Load tile that has external content with implicit tiling") {

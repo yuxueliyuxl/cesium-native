@@ -477,7 +477,11 @@ std::optional<Tile> parseTileJsonRecursively(
 
   // parse tile transform
   const std::optional<glm::dmat4x4> transform =
-      CesiumUtility::JsonHelpers::getTransformProperty(tileJson, "transform");
+      currentLoader.getIgnoreTransform()
+          ? std::optional<glm::dmat4x4>(glm::dmat4x4(1.0))
+          : CesiumUtility::JsonHelpers::getTransformProperty(
+                tileJson,
+                "transform");
   glm::dmat4x4 tileTransform =
       parentTransform * transform.value_or(glm::dmat4x4(1.0));
 
@@ -680,11 +684,15 @@ TilesetContentLoaderResult<TilesetJsonLoader> parseTilesetJson(
     const rapidjson::Document& tilesetJson,
     const glm::dmat4& parentTransform,
     TileRefine parentRefine,
-    const CesiumGeospatial::Ellipsoid& ellipsoid) {
+    const CesiumGeospatial::Ellipsoid& ellipsoid,
+    bool ignoreTransform = false) {
   std::unique_ptr<Tile> pRootTile;
   auto gltfUpAxis = obtainGltfUpAxis(tilesetJson, pLogger);
-  auto pLoader =
-      std::make_unique<TilesetJsonLoader>(baseUrl, gltfUpAxis, ellipsoid);
+  auto pLoader = std::make_unique<TilesetJsonLoader>(
+      baseUrl,
+      gltfUpAxis,
+      ellipsoid,
+      ignoreTransform);
   std::optional<ExtensionContent3dTilesContentVoxels> voxelExtension;
 
   const auto rootIt = tilesetJson.FindMember("root");
@@ -773,7 +781,8 @@ TileLoadResult parseExternalTilesetInWorkerThread(
     std::shared_ptr<CesiumAsync::IAssetRequest>&& pCompletedRequest,
     ExternalContentInitializer&& externalContentInitializer,
     const CesiumGeospatial::Ellipsoid& ellipsoid,
-    rapidjson::Document&& tilesetJson) {
+    rapidjson::Document&& tilesetJson,
+    bool ignoreTransform) {
   const auto& tileUrl = pCompletedRequest->url();
 
   // Save the parsed external tileset into custom data.
@@ -788,7 +797,8 @@ TileLoadResult parseExternalTilesetInWorkerThread(
           tilesetJson,
           tileTransform,
           tileRefine,
-          ellipsoid);
+          ellipsoid,
+          ignoreTransform);
 
   // Populate the root tile with metadata
   removeRootPropertyAndParseTilesetMetadata(
@@ -834,7 +844,8 @@ TileLoadResult parseJsonContentInWorkerThread(
     const std::shared_ptr<CesiumAsync::IAssetAccessor>& pAssetAccessor,
     std::shared_ptr<CesiumAsync::IAssetRequest>&& pCompletedRequest,
     ExternalContentInitializer&& externalContentInitializer,
-    const CesiumGeospatial::Ellipsoid& ellipsoid) {
+    const CesiumGeospatial::Ellipsoid& ellipsoid,
+    bool ignoreTransform) {
   const CesiumAsync::IAssetResponse* pResponse = pCompletedRequest->response();
   const auto& responseData = pResponse->data();
 
@@ -893,7 +904,8 @@ TileLoadResult parseJsonContentInWorkerThread(
         std::move(pCompletedRequest),
         std::move(externalContentInitializer),
         ellipsoid,
-        std::move(jsonContent));
+        std::move(jsonContent),
+        ignoreTransform);
   }
 }
 } // namespace
@@ -901,19 +913,26 @@ TileLoadResult parseJsonContentInWorkerThread(
 TilesetJsonLoader::TilesetJsonLoader(
     const std::string& baseUrl,
     CesiumGeometry::Axis upAxis,
-    const CesiumGeospatial::Ellipsoid& ellipsoid)
-    : _baseUrl{baseUrl}, _ellipsoid{ellipsoid}, _upAxis{upAxis}, _children{} {}
+    const CesiumGeospatial::Ellipsoid& ellipsoid,
+    bool ignoreTransform)
+    : _baseUrl{baseUrl},
+      _ellipsoid{ellipsoid},
+      _ignoreTransform{ignoreTransform},
+      _upAxis{upAxis},
+      _children{} {}
 
 CesiumAsync::Future<TilesetContentLoaderResult<TilesetJsonLoader>>
 TilesetJsonLoader::createLoader(
     const TilesetExternals& externals,
     const std::string& tilesetJsonUrl,
     const std::vector<CesiumAsync::IAssetAccessor::THeader>& requestHeaders,
-    const CesiumGeospatial::Ellipsoid& ellipsoid) {
+    const CesiumGeospatial::Ellipsoid& ellipsoid,
+    bool ignoreTransform) {
 
   return externals.pAssetAccessor
       ->get(externals.asyncSystem, tilesetJsonUrl, requestHeaders)
       .thenInWorkerThread([ellipsoid,
+                           ignoreTransform,
                            asyncSystem = externals.asyncSystem,
                            pAssetAccessor = externals.pAssetAccessor,
                            pLogger = externals.pLogger](
@@ -964,7 +983,8 @@ TilesetJsonLoader::createLoader(
             pCompletedRequest->url(),
             pCompletedRequest->headers(),
             std::move(tilesetJson),
-            ellipsoid);
+            ellipsoid,
+            ignoreTransform);
       });
 }
 
@@ -976,7 +996,8 @@ TilesetJsonLoader::createLoader(
     const std::string& tilesetJsonUrl,
     const CesiumAsync::HttpHeaders& requestHeaders,
     rapidjson::Document&& tilesetJson,
-    const CesiumGeospatial::Ellipsoid& ellipsoid) {
+    const CesiumGeospatial::Ellipsoid& ellipsoid,
+    bool ignoreTransform) {
   TilesetContentLoaderResult<TilesetJsonLoader> result = parseTilesetJson(
       pLogger,
       tilesetJsonUrl,
@@ -984,7 +1005,8 @@ TilesetJsonLoader::createLoader(
       tilesetJson,
       glm::dmat4(1.0),
       TileRefine::Replace,
-      ellipsoid);
+      ellipsoid,
+      ignoreTransform);
 
   if (!result.pRootTile) {
     return asyncSystem.createResolvedFuture(std::move(result));
@@ -1095,6 +1117,7 @@ TilesetJsonLoader::loadTileContent(const TileLoadInput& loadInput) {
   const auto& pSharedAssetSystem = loadInput.pSharedAssetSystem;
   const auto& requestHeaders = loadInput.requestHeaders;
   const auto& contentOptions = loadInput.contentOptions;
+  const bool ignoreTransform = this->_ignoreTransform;
 
   // If the URL is empty, this tile is empty content and we don't need to make a
   // web request to complete the loading process (in fact, a web request would
@@ -1123,6 +1146,7 @@ TilesetJsonLoader::loadTileContent(const TileLoadInput& loadInput) {
            tileTransform,
            tileRefine,
            ellipsoid,
+           ignoreTransform,
            upAxis = _upAxis,
            externalContentInitializer = std::move(externalContentInitializer),
            pAssetAccessor,
@@ -1219,7 +1243,8 @@ TilesetJsonLoader::loadTileContent(const TileLoadInput& loadInput) {
                       pAssetAccessor,
                       std::move(pCompletedRequest),
                       std::move(externalContentInitializer),
-                      ellipsoid));
+                      ellipsoid,
+                      ignoreTransform));
             }
           });
 }
@@ -1241,6 +1266,10 @@ const std::string& TilesetJsonLoader::getBaseUrl() const noexcept {
 
 CesiumGeometry::Axis TilesetJsonLoader::getUpAxis() const noexcept {
   return _upAxis;
+}
+
+bool TilesetJsonLoader::getIgnoreTransform() const noexcept {
+  return this->_ignoreTransform;
 }
 
 void TilesetJsonLoader::addChildLoader(

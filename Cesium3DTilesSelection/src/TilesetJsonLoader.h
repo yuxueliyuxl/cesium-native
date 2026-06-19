@@ -19,7 +19,8 @@ public:
   TilesetJsonLoader(
       const std::string& baseUrl,
       CesiumGeometry::Axis upAxis,
-      const CesiumGeospatial::Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID);
+      const CesiumGeospatial::Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID,
+      bool ignoreTransform = false);
 
   CesiumAsync::Future<TileLoadResult>
   loadTileContent(const TileLoadInput& loadInput) override;
@@ -33,6 +34,8 @@ public:
 
   CesiumGeometry::Axis getUpAxis() const noexcept;
 
+  bool getIgnoreTransform() const noexcept;
+
   void addChildLoader(std::unique_ptr<TilesetContentLoader> pLoader);
 
   static CesiumAsync::Future<TilesetContentLoaderResult<TilesetJsonLoader>>
@@ -40,7 +43,8 @@ public:
       const TilesetExternals& externals,
       const std::string& tilesetJsonUrl,
       const std::vector<CesiumAsync::IAssetAccessor::THeader>& requestHeaders,
-      const CesiumGeospatial::Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID);
+      const CesiumGeospatial::Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID,
+      bool ignoreTransform = false);
 
   static CesiumAsync::Future<TilesetContentLoaderResult<TilesetJsonLoader>>
   createLoader(
@@ -50,7 +54,8 @@ public:
       const std::string& tilesetJsonUrl,
       const CesiumAsync::HttpHeaders& requestHeaders,
       rapidjson::Document&& tilesetJson,
-      const CesiumGeospatial::Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID);
+      const CesiumGeospatial::Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID,
+      bool ignoreTransform = false);
 
 protected:
   void setOwnerOfNestedLoaders(TilesetContentManager& owner) noexcept override;
@@ -59,6 +64,7 @@ private:
   std::string _baseUrl;
   CesiumGeospatial::Ellipsoid _ellipsoid;
   CesiumUtility::IntrusivePointer<TilesetSharedAssetSystem> _pSharedAssetSystem;
+  bool _ignoreTransform;
 
   /**
    * @brief The axis that was declared as the "up-axis" for glTF content.

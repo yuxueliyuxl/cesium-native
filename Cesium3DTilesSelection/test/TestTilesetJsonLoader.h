@@ -23,6 +23,8 @@ Cesium3DTilesSelection::TilesetExternals createMockJsonTilesetExternals(
     std::shared_ptr<CesiumNativeTests::SimpleAssetAccessor>& pAssetAccessor);
 
 TilesetContentLoaderResult<TilesetJsonLoader>
-createTilesetJsonLoader(const std::filesystem::path& tilesetPath);
+createTilesetJsonLoader(
+    const std::filesystem::path& tilesetPath,
+    bool ignoreTransform = false);
 
 } // namespace Cesium3DTilesSelection
