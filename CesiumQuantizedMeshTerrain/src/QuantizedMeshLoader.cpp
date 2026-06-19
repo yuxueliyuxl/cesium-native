@@ -1,3 +1,4 @@
+#include "CesiumGeometry/IntersectionTests.h"
 #include <CesiumGeometry/QuadtreeTileID.h>
 #include <CesiumGeometry/QuadtreeTileRectangularRange.h>
 #include <CesiumGeospatial/BoundingRegion.h>
@@ -729,7 +730,10 @@ QuantizedMeshMetadataResult processMetadata(
     const std::string& url,
     const std::span<const std::byte>& data,
     bool enableWaterMask,
-    const CesiumGeospatial::Ellipsoid& ellipsoid) {
+    const CesiumGeospatial::Ellipsoid& ellipsoid,
+    double terrainExaggeration,//zzt 地形夸张
+    const std::vector<CesiumGeospatial::HoloTerrainSmoothingConfig>&
+        terrainSmoothingConfigs /*= {}*/) {
 
   CESIUM_TRACE("Cesium3DTilesSelection::QuantizedMeshLoader::load");
 
@@ -768,8 +772,8 @@ QuantizedMeshMetadataResult processMetadata(
       pHeader->HorizonOcclusionPointX,
       pHeader->HorizonOcclusionPointY,
       pHeader->HorizonOcclusionPointZ);
-  const double minimumHeight = pHeader->MinimumHeight;
-  const double maximumHeight = pHeader->MaximumHeight;
+  /* const*/ double minimumHeight = pHeader->MinimumHeight * terrainExaggeration;
+  /* const*/ double maximumHeight = pHeader->MaximumHeight * terrainExaggeration;
 
   glm::dvec3 positionMinimums{std::numeric_limits<double>::max()};
   glm::dvec3 positionMaximums{std::numeric_limits<double>::lowest()};
@@ -786,6 +790,8 @@ QuantizedMeshMetadataResult processMetadata(
   int32_t height = 0;
   std::vector<glm::dvec3> uvsAndHeights;
   uvsAndHeights.reserve(vertexCount);
+  std::vector<double> heights;
+  HoloTerrainSmoothingConfig theTerrainSmoothingConfig;
   for (size_t i = 0; i < vertexCount; ++i) {
     u += zigZagDecode(meshView->uBuffer[i]);
     v += zigZagDecode(meshView->vBuffer[i]);
@@ -797,8 +803,32 @@ QuantizedMeshMetadataResult processMetadata(
 
     const double longitude = Math::lerp(west, east, uRatio);
     const double latitude = Math::lerp(south, north, vRatio);
-    const double heightMeters =
+    /* const*/ double heightMeters =
         Math::lerp(minimumHeight, maximumHeight, heightRatio);
+    // apply terrain smoothing zzt
+    for (const auto& terrainSmoothingConfig : terrainSmoothingConfigs) {
+      if (tileID.level >=
+          static_cast<uint32_t>(terrainSmoothingConfig.StartLevel)) {
+
+        auto polygon = terrainSmoothingConfig.Polygon;
+        const std::vector<glm::dvec2>& vertices = polygon.getVertices();
+        const std::vector<uint32_t>& indices = polygon.getIndices();
+
+        for (size_t j = 2; j < indices.size(); j += 3) {
+          if (IntersectionTests::pointInTriangle(
+                  {longitude, latitude},
+                  vertices[indices[j - 2]],
+                  vertices[indices[j - 1]],
+                  vertices[indices[j]])) {
+            heightMeters = terrainSmoothingConfig.Height;
+            theTerrainSmoothingConfig = terrainSmoothingConfig;
+            break;
+          }
+        }
+      }
+    }
+    // end terrain smoothing
+    heights.emplace_back(heightMeters);
 
     glm::dvec3 position = ellipsoid.cartographicToCartesian(
         Cartographic(longitude, latitude, heightMeters));
@@ -813,6 +843,37 @@ QuantizedMeshMetadataResult processMetadata(
     uvsAndHeights.emplace_back(uRatio, vRatio, heightRatio);
   }
 
+    // apply terrain smoothing zzt
+  if (theTerrainSmoothingConfig.Polygon.getVertices().size() > 0 &&
+      tileID.level >=
+          static_cast<uint32_t>(theTerrainSmoothingConfig.StartLevel)) {
+
+    if (!CartographicPolygon::rectangleIsOutsidePolygons(
+            tileBoundingVolume.getRectangle(),
+            {theTerrainSmoothingConfig.Polygon})) {
+      if (CartographicPolygon::rectangleIsWithinPolygons(
+              tileBoundingVolume.getRectangle(),
+              {theTerrainSmoothingConfig.Polygon})) {
+        minimumHeight = theTerrainSmoothingConfig.Height;
+        maximumHeight = theTerrainSmoothingConfig.Height;
+      } else {
+        minimumHeight =
+            glm::min(minimumHeight, theTerrainSmoothingConfig.Height);
+        maximumHeight =
+            glm::max(maximumHeight, theTerrainSmoothingConfig.Height);
+      }
+    }
+  }
+
+  for (size_t i = 0; i < heights.size(); ++i) {
+    if ((maximumHeight - minimumHeight) == 0) {
+      uvsAndHeights[i].z = 0;
+    } else {
+      uvsAndHeights[i].z =
+          (heights[i] - minimumHeight) / (maximumHeight - minimumHeight);
+    }
+  }
+  // end terrain smoothing
   // decode normal vertices of the tile as well as its metadata without skirt
   std::vector<std::byte> outputNormalsBuffer;
   std::span<float> outputNormals;
@@ -845,7 +906,7 @@ QuantizedMeshMetadataResult processMetadata(
       meshView->indexType == QuantizedMeshIndexType::UnsignedInt
           ? sizeof(uint32_t)
           : sizeof(uint16_t);
-  const double skirtHeight = calculateSkirtHeight(ellipsoid, rectangle);
+  const double skirtHeight = calculateSkirtHeight(ellipsoid, rectangle) * abs(terrainExaggeration); //缝合边高度计算，* 地形夸张系数：为负值时取绝对值，对于边计算有效 zzt;
   const double longitudeOffset = (east - west) * 0.0001;
   const double latitudeOffset = (north - south) * 0.0001;
   if (meshView->indexType == QuantizedMeshIndexType::UnsignedInt) {

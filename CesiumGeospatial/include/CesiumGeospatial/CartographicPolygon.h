@@ -97,5 +97,10 @@ private:
   std::vector<uint32_t> _indices;
   std::optional<CesiumGeospatial::GlobeRectangle> _boundingRectangle;
 };
-
+//zzt 地形平滑
+struct CESIUMGEOSPATIAL_API HoloTerrainSmoothingConfig {
+  int StartLevel = 5;
+  double Height = 0;
+  CartographicPolygon Polygon{{}};
+};
 } // namespace CesiumGeospatial

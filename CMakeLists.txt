@@ -448,6 +448,7 @@ add_subdirectory(CesiumITwinClient)
 add_subdirectory(CesiumQuantizedMeshTerrain)
 add_subdirectory(CesiumVectorData)
 add_subdirectory(CesiumVectorOverlays)
+add_subdirectory(CesiumHoloveser)
 
 if(NOT CESIUM_DISABLE_CURL)
     add_subdirectory(CesiumCurl)

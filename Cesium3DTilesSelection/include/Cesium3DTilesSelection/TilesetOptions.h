@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <CesiumGeospatial/CartographicPolygon.h> //zzt
+
 namespace Cesium3DTilesSelection {
 
 class ITileExcluder;
@@ -55,6 +57,16 @@ struct CESIUM3DTILESSELECTION_API TilesetContentOptions {
    * shader.
    */
   bool applyTextureTransform = true;
+
+  /*地形夸张系数 by zzt
+  */
+  double terrainExaggeration=1.0;
+    /*
+  忽略tileset.json中的Transform矩阵 by zzt
+  */
+  bool  ignoreTransform=false;
+  //地形平滑 zzt
+  std::vector<CesiumGeospatial::HoloTerrainSmoothingConfig> TerrainSmoothingConfigs;
 };
 
 /**

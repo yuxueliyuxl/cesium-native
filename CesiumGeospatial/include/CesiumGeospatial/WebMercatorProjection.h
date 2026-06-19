@@ -7,6 +7,8 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
+#include <string>
+
 namespace CesiumGeospatial {
 
 class Cartographic;
@@ -67,7 +69,8 @@ public:
    * @param ellipsoid The {@link Ellipsoid}.
    */
   WebMercatorProjection(
-      const Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID) noexcept;
+      const Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID,
+      std::string projection = "WGS84") noexcept;
 
   /**
    * @brief Gets the {@link Ellipsoid}.
@@ -171,6 +174,7 @@ private:
   Ellipsoid _ellipsoid;
   double _semimajorAxis;
   double _oneOverSemimajorAxis;
+  std::string _projection;
 };
 
 } // namespace CesiumGeospatial

@@ -707,7 +707,8 @@ Future<QuantizedMeshLoadResult> requestTileContent(
     const LayerJsonTerrainLoader::Layer& layer,
     const std::vector<IAssetAccessor::THeader>& requestHeaders,
     bool enableWaterMask,
-    const CesiumGeospatial::Ellipsoid& ellipsoid) {
+    const CesiumGeospatial::Ellipsoid& ellipsoid,
+  const TilesetContentOptions& contentOptions/*zzt 地形选项*/) {
   std::string url = resolveTileUrl(tileID, layer);
   return pAssetAccessor->get(asyncSystem, url, requestHeaders)
       .thenInWorkerThread([ellipsoid,
@@ -715,7 +716,8 @@ Future<QuantizedMeshLoadResult> requestTileContent(
                            pLogger,
                            tileID,
                            boundingRegion,
-                           enableWaterMask](
+                           enableWaterMask,
+                          contentOptions](
                               std::shared_ptr<IAssetRequest>&& pRequest) {
         const IAssetResponse* pResponse = pRequest->response();
         if (!pResponse) {
@@ -744,7 +746,9 @@ Future<QuantizedMeshLoadResult> requestTileContent(
             pRequest->url(),
             pResponse->data(),
             enableWaterMask,
-            ellipsoid);
+            ellipsoid,
+            contentOptions.terrainExaggeration,//zzt
+            contentOptions.TerrainSmoothingConfigs);
       });
 }
 
@@ -872,7 +876,8 @@ LayerJsonTerrainLoader::loadTileContent(const TileLoadInput& loadInput) {
       currentLayer,
       requestHeaders,
       contentOptions.enableWaterMask,
-      ellipsoid);
+      ellipsoid,
+      contentOptions/*zzt*/);
 
   // determine if this tile is at the availability level of the current layer
   // and if we need to add the availability rectangles to the current layer. We

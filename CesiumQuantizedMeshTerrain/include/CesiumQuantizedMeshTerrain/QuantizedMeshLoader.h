@@ -19,6 +19,7 @@
 namespace CesiumAsync {
 class IAssetRequest;
 }
+#include "CesiumGeospatial/CartographicPolygon.h" //zzt
 
 namespace CesiumQuantizedMeshTerrain {
 
@@ -105,7 +106,9 @@ public:
       const std::string& url,
       const std::span<const std::byte>& data,
       bool enableWaterMask,
-      const CesiumGeospatial::Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID);
+      const CesiumGeospatial::Ellipsoid& ellipsoid CESIUM_DEFAULT_ELLIPSOID,
+      double terrainExaggeration = 1.0, // 新增：为新增的地形夸张参数提供默认值，保持向后兼容
+      const std::vector<CesiumGeospatial::HoloTerrainSmoothingConfig>& terrainSmoothingConfigs = {});
 
   /**
    * @brief Parses the metadata (tile availability) from the given

@@ -5,6 +5,8 @@
 #include <CesiumGeospatial/WebMercatorProjection.h>
 #include <CesiumUtility/Math.h>
 
+#include "ProjectionConvert.h"
+
 #include <glm/exponential.hpp>
 #include <glm/ext/vector_double2.hpp>
 #include <glm/ext/vector_double3.hpp>
@@ -24,18 +26,30 @@ namespace CesiumGeospatial {
         MAXIMUM_LATITUDE);
 
 WebMercatorProjection::WebMercatorProjection(
-    const Ellipsoid& ellipsoid) noexcept
+    const Ellipsoid& ellipsoid,
+    std::string projection) noexcept
     : _ellipsoid(ellipsoid),
       _semimajorAxis(ellipsoid.getMaximumRadius()),
-      _oneOverSemimajorAxis(1.0 / ellipsoid.getMaximumRadius()) {}
+      _oneOverSemimajorAxis(1.0 / ellipsoid.getMaximumRadius()),
+      _projection(std::move(projection)) {}
 
 glm::dvec3 WebMercatorProjection::project(
     const Cartographic& cartographic) const noexcept {
   const double semimajorAxis = this->_semimajorAxis;
+  double longitude = cartographic.longitude;
+  double latitude = cartographic.latitude;
+  if (this->_projection != "WGS84") {
+    const glm::dvec2 converted = ProjectionConvert::WGS84ToGCJ02(
+        CesiumUtility::Math::radiansToDegrees(longitude),
+        CesiumUtility::Math::radiansToDegrees(latitude));
+    longitude = CesiumUtility::Math::degreesToRadians(converted.x);
+    latitude = CesiumUtility::Math::degreesToRadians(converted.y);
+  }
+
   return glm::dvec3(
-      cartographic.longitude * semimajorAxis,
+      longitude * semimajorAxis,
       WebMercatorProjection::geodeticLatitudeToMercatorAngle(
-          cartographic.latitude) *
+          latitude) *
           semimajorAxis,
       cartographic.height);
 }
@@ -51,11 +65,21 @@ Cartographic WebMercatorProjection::unproject(
     const glm::dvec2& projectedCoordinates) const noexcept {
   const double oneOverEarthSemimajorAxis = this->_oneOverSemimajorAxis;
 
-  return Cartographic(
+  Cartographic result(
       projectedCoordinates.x * oneOverEarthSemimajorAxis,
       WebMercatorProjection::mercatorAngleToGeodeticLatitude(
           projectedCoordinates.y * oneOverEarthSemimajorAxis),
       0.0);
+
+  if (this->_projection != "WGS84") {
+    const glm::dvec2 converted = ProjectionConvert::GCJ02ToWGS84(
+        CesiumUtility::Math::radiansToDegrees(result.longitude),
+        CesiumUtility::Math::radiansToDegrees(result.latitude));
+    result.longitude = CesiumUtility::Math::degreesToRadians(converted.x);
+    result.latitude = CesiumUtility::Math::degreesToRadians(converted.y);
+  }
+
+  return result;
 }
 
 Cartographic WebMercatorProjection::unproject(
