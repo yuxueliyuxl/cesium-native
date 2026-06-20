@@ -1,126 +1,401 @@
-# Cesium Native
+# cesium-native 定制修改说明
 
-[![License](https://img.shields.io/:license-Apache_2.0-blue.svg)](https://github.com/CesiumGS/cesium-native/blob/main/LICENSE)
-[![Build Status](https://github.com/CesiumGS/cesium-native/actions/workflows/build.yml/badge.svg)](https://github.com/CesiumGS/cesium-native/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/tag/CesiumGS/cesium-native?label=release)](https://github.com/CesiumGS/cesium-native/tags)
+本文档记录 `yuxueliyuxl/cesium-native` 相对官方版本的定制功能，供后续升级
+cesium-native、迁移到新版本 Cesium for Unreal、排查编译问题时使用。
 
-📚<a href="https://cesium.com/learn/cesium-native/ref-doc/">Documentation</a> - 📒<a href="CHANGES.md">Change Log</a> - 💬<a href="https://community.cesium.com/">Community Forums</a>
+## 1. 仓库与版本
 
-## 📖About
+- cesium-native 仓库：`https://github.com/yuxueliyuxl/cesium-native`
+- Cesium for Unreal 仓库：`https://github.com/yuxueliyuxl/cesium-unreal`
+- native 子模块目录：`extern/cesium-native`
+- 本次定制基线：`bfc2c574cd318ea8a744e137304b8febc4199fd6`
+- 投影、栅格覆盖和地形提交：`53523e9290fa2584e31c0dfbb7426b61d38cc26a`
+- 忽略 Tileset Transform 提交：`838a2b349ceb8a58482987f33deb24ec1c1516e6`
 
-Cesium Native is a set of C++ libraries for 3D geospatial, including:
+查看完整定制差异时，应优先检查上述两个 native 提交，避免把后续官方更新误认为
+定制代码：
 
-* [3D Tiles](https://github.com/CesiumGS/3d-tiles) runtime streaming
-* lightweight glTF serialization and deserialization
-* high-precision 3D geospatial math types and functions, including support for global-scale WGS84 ellipsoids.
-* support for draping raster overlays from WMS, TMS, WMTS, and other sources over 3D tilesets
+```powershell
+git show 53523e929
+git show 838a2b349
+```
 
-Cesium Native powers Cesium's runtime integrations for [Cesium for Unreal](https://github.com/CesiumGS/cesium-unreal), [Cesium for Unity](https://github.com/CesiumGS/cesium-unity), [Cesium for Omniverse](https://github.com/CesiumGS/cesium-omniverse), and [Cesium for O3DE](https://github.com/CesiumGS/cesium-o3de). Cesium Native is the foundational layer for any 3D geospatial software, especially those that want to stream 3D Tiles. See [Projects Using Cesium Native](#projects-using-cesium-native) for a list of projects currently integrating with Cesium Native.
+## 2. 定制功能概览
 
-![Cesium Platform and Ecosystem](./doc/img/integration-ecosystem-diagram.png)
+| 功能 | 配置/API | 默认行为 |
+| --- | --- | --- |
+| GCJ-02 Web Mercator 投影 | `WebMercatorProjection(Ellipsoid, "GCJ02")` | `"WGS84"` |
+| 自定义栅格覆盖模块 | `CesiumHoloveser` | 按需创建 Overlay |
+| 地形夸张 | `TilesetContentOptions::terrainExaggeration` | `1.0` |
+| 地形多边形平滑/压平 | `TilesetContentOptions::TerrainSmoothingConfigs` | 空数组 |
+| 忽略 tileset transform | `TilesetContentOptions::ignoreTransform` | `false` |
 
-<p align="center"><em>A high-level Cesium platform architecture with the runtime integrations powered by Cesium Native and streaming content from Cesium ion.</em></p>
+所有新增选项均提供兼容默认值。未显式启用时，应保持官方原有行为。
 
-## 📷Screenshots
+## 3. GCJ-02 投影
 
-<table>
-  <tr>
-    <td>
-      <!--! \if DOXYGEN_EXCLUDE -->
-      <img src="doc/img/screenshot-googleplex.jpg" alt="Googleplex" />
-      <!--! \endif -->
-      <!--! \image html screenshot-googleplex.jpg -->
-      <p align="center"><sub>The Googleplex in Mountain View, California, USA, visualized with Google Photorealistic 3D Tiles in Cesium for Unity.</sub></p>
-    </td>
-    <td>
-      <!--! \if DOXYGEN_EXCLUDE -->
-      <img src="doc/img/screenshot-ny-metadata.jpg" alt="New York" />
-      <!--! \endif -->
-      <!--! \image html screenshot-ny-metadata.jpg -->
-      <p align="center"><sub>Cesium OSM Buildings in Cesium for Unreal with shading from metadata on building height and age.</sub></p>
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <!--! \if DOXYGEN_EXCLUDE -->
-      <img src="doc/img/screenshot-copernicus-crater.jpg" alt="Copernicus Crater" />
-      <!--! \endif -->
-      <!--! \image html screenshot-copernicus-crater.jpg -->
-      <p align="center"><sub>The Copernicus Crater, visualized with Cesium Moon Terrain in Cesium for Unreal.<br/>&nbsp;<!-- fake third line to align the two images and captions --></sub></p>
-    </td>
-    <td>
-      <!--! \if DOXYGEN_EXCLUDE -->
-      <img src="doc/img/screenshot-san-francisco.jpg" alt="San Francisco" />
-      <!--! \endif -->
-      <!--! \image html screenshot-san-francisco.jpg -->
-      <p align="center"><sub>Cesium for Omniverse scene set in San Francisco, California, USA. Data courtesy Aerometrex.</sub></p>
-    </td>
-  </tr>
-</table>
+### 3.1 涉及文件
 
-## 🗃️Libraries Overview
+- `CesiumGeospatial/include/CesiumGeospatial/WebMercatorProjection.h`
+- `CesiumGeospatial/src/WebMercatorProjection.cpp`
+- `CesiumGeospatial/src/ProjectionConvert.h`
+- `CesiumGeospatial/src/ProjectionConvert.cpp`
+- `CesiumGeospatial/test/TestProjection.cpp`
 
-| Library                        | Description                                                                                                     |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| **Cesium3DTiles**              | Lightweight 3D Tiles classes.                                                                                   |
-| **Cesium3DTilesContent**       | Classes that support loading and converting 3D Tiles tile content.                                              |
-| **Cesium3DTilesReader**        | 3D Tiles deserialization, including 3D Tiles extension support.                                                 |
-| **Cesium3DTilesWriter**        | 3D Tiles serialization, including 3D Tiles extension support.                                                   |
-| **Cesium3DTilesSelection**     | Runtime streaming, level of detail selection, culling, cache management, and decoding of 3D Tiles.              |
-| **CesiumAsync**                | Classes for multi-threaded asynchronous tasks.                                                                  |
-| **CesiumClientCommon**         | Functionality shared between ion and iTwin client implementations, primarily shared authentication code.        |
-| **CesiumCurl**                 | Provides the ability to access HTTP and other network resources using libcurl.                                  |
-| **CesiumGeometry**             | Common 3D geometry classes; and bounds testing, intersection testing, and spatial indexing algorithms.          |
-| **CesiumGeospatial**           | 3D geospatial math types and functions for ellipsoids, transforms, projections.                                 |
-| **CesiumGltf**                 | Lightweight glTF processing and optimization functions.                                                         |
-| **CesiumGltfContent**          | Classes that support manipulating the content of a glTF.                                                        |
-| **CesiumGltfReader**           | glTF deserialization / decoding, including glTF extension support (`KHR_draco_mesh_compression` etc).           |
-| **CesiumGltfWriter**           | glTF serialization / encoding, including glTF extension support.                                                |
-| **CesiumIonClient**            | Functions to access [Cesium ion](https://cesium.com/cesium-ion/) accounts and 3D tilesets using ion's REST API. |
-| **CesiumITwinClient**          | Functions to access the [Bentley iTwin](https://www.bentley.com/software/itwin-platform/) platform.             |
-| **CesiumJsonReader**           | Reads JSON from a buffer into statically-typed classes.                                                         |
-| **CesiumJsonWriter**           | Writes JSON from statically-typed classes into a buffer.                                                        |
-| **CesiumQuantizedMeshTerrain** | Classes for accessing terrain in the [quantized-mesh-1.0](https://github.com/CesiumGS/quantized-mesh) format.   |
-| **CesiumRasterOverlays**       | Classes for raster overlays, which allow draping massive 2D textures over a model.                              |
-| **CesiumUtility**              | Utility functions for JSON parsing, URI processing, credits, etc.                                               |
-| **CesiumVectorData**           | Classes for loading vector data such as GeoJSON.                                                                |
-| **CesiumVectorOverlays**       | Raster overlays for displaying vector data.                                                                     |
+### 3.2 API
 
-## 📗License
+`WebMercatorProjection` 构造函数增加投影类型参数：
 
-[Apache 2.0](http://www.apache.org/licenses/LICENSE-2.0.html). Cesium Native is free for both commercial and non-commercial use.
+```cpp
+WebMercatorProjection(
+    const Ellipsoid& ellipsoid = Ellipsoid::WGS84,
+    std::string projection = "WGS84") noexcept;
+```
 
-## 🔧Projects Using Cesium Native
+使用 GCJ-02：
 
-The following official Cesium integrations are built on top of Cesium Native:
+```cpp
+CesiumGeospatial::WebMercatorProjection projection(
+    CesiumGeospatial::Ellipsoid::WGS84,
+    "GCJ02");
+```
 
-- [Cesium for Unreal](https://github.com/CesiumGS/cesium-unreal)
-- [Cesium for Unity](https://github.com/CesiumGS/cesium-unity)
-- [Cesium for Omniverse](https://github.com/CesiumGS/cesium-omniverse)
-- [Cesium for O3DE](https://github.com/CesiumGS/cesium-o3de)
+### 3.3 数据流
 
-In addition, Cesium Native has been used by the community to build projects including:
-- [vsgCs](https://github.com/timoore/vsgCs) integrates Cesium Native with VulkanSceneGraph.
-- [osgEarth](https://github.com/gwaldron/osgearth) uses Cesium Native to load 3D Tiles in OpenSceneGraph.
-- [3D Tiles for Godot](https://github.com/Battle-Road-Labs/3D-Tiles-For-Godot) integrates Cesium Native with the Godot game engine.
-- [cesium_3d_native](https://github.com/odd-io/cesium_3d_native) provides a Dart wrapper around Cesium Native, allowing integration with Dart/Flutter applications.
-- [cesium-native-python](https://github.com/calebbuffa/cesium-native-python.git) provides python bindings for Cesium Native.
+- `project`：先将 WGS84 经纬度转换为 GCJ-02，再执行 Web Mercator 投影。
+- `unproject`：先执行 Web Mercator 反投影，再将 GCJ-02 转换回 WGS84。
+- 中国境外坐标由 `ProjectionConvert::out_of_china` 判断，境外不偏移。
 
-If you have a project that integrates with Cesium Native that isn't on this list yet, please let us know!
+### 3.4 当前实现注意事项
 
-## ⌛ Backward Compatibility
+当前判断逻辑是：
 
-Cesium Native currently does not have any measures for deprecation or backwards compatibility. This grants us the mobility needed for rapid, iterative development.
+```cpp
+if (_projection != "WGS84") {
+  // 执行 GCJ-02 转换
+}
+```
 
-Breaking changes can be made without warning, but they should be well-documented under the `Breaking Changes` section in [CHANGES.md](CHANGES.md).
+因此任何非 `"WGS84"` 字符串都会进入 GCJ-02 分支。后续维护时建议改为显式判断
+`"GCJ02"`，并为非法值定义回退或错误处理。
 
-> [!note]
-> This will change when Cesium Native is officially released as v1.0.0 with a stabilized API.
+## 4. CesiumHoloveser 模块
 
-## 💻Developing with Cesium Native
+### 4.1 构建接入
 
-See the [Developer Setup Guide](doc/topics/developer-setup.md) to learn how to set up a development environment with Cesium Native and begin developing with it.
+根 `CMakeLists.txt` 增加：
 
-## ⭐Contributing
+```cmake
+add_subdirectory(CesiumHoloveser)
+```
 
-Are you interested in contributing to Cesium Native's development? Contributions can come in many forms, from answering questions to creating issues and pull requests. See our [Contribution Guide](CONTRIBUTING.md) to find out how to get started!
+`CesiumHoloveser/CMakeLists.txt` 创建并安装 `CesiumHoloveser` 静态库，依赖：
+
+- `CesiumAsync`
+- `CesiumGeospatial`
+- `CesiumGeometry`
+- `CesiumGltf`
+- `CesiumGltfContent`
+- `CesiumGltfReader`
+- `CesiumRasterOverlays`
+- `CesiumUtility`
+- `tinyxml2`
+
+### 4.2 主要组件
+
+- `ArcGisMapServerRasterOverlay`
+- `TiandituRasterOverlay`
+- `UrlTemplateRasterOverlay`
+- `WebMapTileServiceRasterOverlay`
+- `HoloIonRasterOverlay`
+- `HoloCreditSystem`
+- HMAC-SHA256 支持
+
+公共头文件位于：
+
+```text
+CesiumHoloveser/include/CesiumHoloveser/
+```
+
+实现位于：
+
+```text
+CesiumHoloveser/src/
+```
+
+### 4.3 维护注意事项
+
+目录中保留了 `GCJ02Projection.rar`、`HoloIonRasterOverlay.rar` 等历史归档文件。
+它们不参与 C++ 编译，但会进入 Git 和安装目录。后续确认不再需要后，可单独清理，
+不要在官方版本迁移时将其误认为必要源码。
+
+## 5. 地形夸张
+
+### 5.1 配置入口
+
+在 `Cesium3DTilesSelection/TilesetOptions.h` 的
+`TilesetContentOptions` 中增加：
+
+```cpp
+double terrainExaggeration = 1.0;
+```
+
+调用链：
+
+```text
+TilesetContentOptions
+  -> LayerJsonTerrainLoader::requestTileContent
+  -> QuantizedMeshLoader::load
+```
+
+### 5.2 Loader API
+
+`QuantizedMeshLoader::load` 增加参数：
+
+```cpp
+double terrainExaggeration = 1.0
+```
+
+### 5.3 处理逻辑
+
+- Quantized Mesh 头部的 `MinimumHeight` 和 `MaximumHeight` 乘以夸张系数。
+- 顶点高度根据调整后的高度范围解码。
+- skirt 高度乘以 `abs(terrainExaggeration)`，避免负系数产生反向 skirt。
+
+默认值为 `1.0`，不改变原始地形。
+
+## 6. 地形平滑/多边形压平
+
+### 6.1 配置结构
+
+`CesiumGeospatial/CartographicPolygon.h` 增加：
+
+```cpp
+struct CESIUMGEOSPATIAL_API HoloTerrainSmoothingConfig {
+  int StartLevel = 5;
+  double Height = 0;
+  CartographicPolygon Polygon{{}};
+};
+```
+
+`TilesetContentOptions` 增加：
+
+```cpp
+std::vector<CesiumGeospatial::HoloTerrainSmoothingConfig>
+    TerrainSmoothingConfigs;
+```
+
+`QuantizedMeshLoader::load` 增加：
+
+```cpp
+const std::vector<CesiumGeospatial::HoloTerrainSmoothingConfig>&
+    terrainSmoothingConfigs = {}
+```
+
+### 6.2 处理逻辑
+
+对 Quantized Mesh 的每个顶点：
+
+1. 计算顶点经纬度。
+2. 仅当 `tileID.level >= StartLevel` 时检查多边形。
+3. 使用多边形三角形索引和
+   `CesiumGeometry::IntersectionTests::pointInTriangle` 判断顶点是否位于区域内。
+4. 命中后将该顶点高度直接设置为配置中的 `Height`。
+5. 根据平滑后的高度重新计算 glTF 高度归一化值和包围高度范围。
+
+### 6.3 当前实现注意事项
+
+- 这是区域内固定高度压平，而不是边缘渐变式平滑。
+- 多个配置同时命中时，后面的配置仍可覆盖前面的高度。
+- 用于更新整体最小/最大高度范围的是最后一次记录到的命中配置。
+- 多边形顶点和 Quantized Mesh 顶点使用弧度制经纬度。
+
+未来如果需要柔和边缘，应新增过渡距离和插值逻辑，不应直接改变现有配置含义。
+
+## 7. 忽略 tileset.json 的 transform
+
+### 7.1 配置入口
+
+`TilesetContentOptions` 中增加：
+
+```cpp
+bool ignoreTransform = false;
+```
+
+### 7.2 涉及文件
+
+- `Cesium3DTilesSelection/include/Cesium3DTilesSelection/TilesetOptions.h`
+- `Cesium3DTilesSelection/src/TilesetContentManager.cpp`
+- `Cesium3DTilesSelection/src/TilesetJsonLoader.h`
+- `Cesium3DTilesSelection/src/TilesetJsonLoader.cpp`
+- `Cesium3DTilesSelection/test/TestTilesetJsonLoader.h`
+- `Cesium3DTilesSelection/test/TestTilesetJsonLoader.cpp`
+
+### 7.3 数据流
+
+```text
+TilesetContentOptions::ignoreTransform
+  -> TilesetContentManager::createFromUrl
+  -> TilesetJsonLoader::createLoader
+  -> TilesetJsonLoader::_ignoreTransform
+  -> parseTileJsonRecursively
+```
+
+启用后，JSON 中每个 tile 的 `transform` 被单位矩阵替代：
+
+```cpp
+const std::optional<glm::dmat4x4> transform =
+    currentLoader.getIgnoreTransform()
+        ? std::optional<glm::dmat4x4>(glm::dmat4x4(1.0))
+        : JsonHelpers::getTransformProperty(tileJson, "transform");
+```
+
+仍然保留调用方传入的 `parentTransform`。因此该选项只忽略 tileset JSON 自身声明的
+矩阵，不会清除程序在外层施加的变换。
+
+### 7.4 外部嵌套 tileset
+
+新版实现会将 `_ignoreTransform` 继续传给外部嵌套 tileset 的 loader，使整棵
+tileset 树保持一致。
+
+这与旧实现不同：旧实现只影响主 tileset，没有把该参数继续传给外部 tileset。
+
+### 7.5 测试
+
+`TestTilesetJsonLoader.cpp` 增加两类回归测试：
+
+- 忽略根 tile 和子 tile 的 transform，并验证几何误差不再被缩放矩阵放大。
+- 验证外部嵌套 `TilesetJsonLoader` 继承 `ignoreTransform=true`。
+
+## 8. 完整文件清单
+
+### 8.1 新增文件
+
+```text
+CesiumGeospatial/src/ProjectionConvert.cpp
+CesiumGeospatial/src/ProjectionConvert.h
+CesiumHoloveser/CMakeLists.txt
+CesiumHoloveser/include/CesiumHoloveser/*
+CesiumHoloveser/src/*
+```
+
+### 8.2 修改文件
+
+```text
+CMakeLists.txt
+Cesium3DTilesSelection/include/Cesium3DTilesSelection/TilesetOptions.h
+Cesium3DTilesSelection/src/LayerJsonTerrainLoader.cpp
+Cesium3DTilesSelection/src/TilesetContentManager.cpp
+Cesium3DTilesSelection/src/TilesetJsonLoader.cpp
+Cesium3DTilesSelection/src/TilesetJsonLoader.h
+Cesium3DTilesSelection/test/TestTilesetJsonLoader.cpp
+Cesium3DTilesSelection/test/TestTilesetJsonLoader.h
+CesiumGeospatial/include/CesiumGeospatial/CartographicPolygon.h
+CesiumGeospatial/include/CesiumGeospatial/WebMercatorProjection.h
+CesiumGeospatial/src/WebMercatorProjection.cpp
+CesiumGeospatial/test/TestProjection.cpp
+CesiumQuantizedMeshTerrain/include/CesiumQuantizedMeshTerrain/QuantizedMeshLoader.h
+CesiumQuantizedMeshTerrain/src/QuantizedMeshLoader.cpp
+```
+
+## 9. Windows 编译
+
+当前验证环境：
+
+- Unreal Engine 5.7.4
+- Visual Studio 2022
+- MSVC 14.44
+- x64 Release
+
+在 `cesium-unreal/extern` 下配置：
+
+```powershell
+cmake -B build -S . `
+  -G "Visual Studio 17 2022" `
+  -A x64 `
+  -T "version=14.44" `
+  -DUNREAL_ENGINE_ROOT="D:/Program Files/Epic Games/UE_5.7"
+```
+
+编译并安装：
+
+```powershell
+cmake --build build --config Release --target install --parallel
+```
+
+产物安装到：
+
+```text
+Source/ThirdParty/lib/Windows-AMD64-Release/
+Source/ThirdParty/include/
+```
+
+本次完整 Windows Release 编译和 install 已通过。
+
+## 10. 测试
+
+ignoreTransform 使用独立测试构建：
+
+```powershell
+cmake -B build-ignore-transform-test -S cesium-native `
+  -G "Visual Studio 17 2022" `
+  -A x64 `
+  -T "version=14.44" `
+  -DBUILD_TESTING=ON `
+  -DCESIUM_TESTS_ENABLED=ON
+
+cmake --build build-ignore-transform-test `
+  --config Release `
+  --target cesium-native-tests `
+  --parallel
+```
+
+相关测试：
+
+```powershell
+.\build-ignore-transform-test\CesiumNativeTests\Release\cesium-native-tests.exe `
+  --test-case="Test creating tileset json loader"
+
+.\build-ignore-transform-test\CesiumNativeTests\Release\cesium-native-tests.exe `
+  --test-case="Test loading individual tile of tileset json"
+```
+
+验证结果：
+
+- 创建 loader：`221 / 221` assertions 通过。
+- 外部 tileset 加载：`203 / 203` assertions 通过。
+
+## 11. 后续同步官方版本的建议流程
+
+1. 在私有 `cesium-native` 仓库中同步官方最新代码。
+2. 创建专用迁移分支，不直接在 detached HEAD 上修改。
+3. 优先尝试将两个定制提交 rebase/cherry-pick 到新基线。
+4. 冲突时按本文档的数据流逐项迁移，不要直接覆盖官方新文件。
+5. 首先迁移配置结构和公开 API，再迁移调用链和实现。
+6. 编译 native 测试目标并运行投影、TilesetJsonLoader 相关测试。
+7. 执行完整 Windows Release install。
+8. 提交 native 修改。
+9. 在 cesium-unreal 中更新 `extern/cesium-native` 子模块指针并单独提交。
+
+建议保持功能提交相互独立，例如：
+
+```text
+Add GCJ02 projection support
+Add CesiumHoloveser overlays
+Add terrain exaggeration and smoothing
+Add option to ignore tileset transforms
+```
+
+这样在官方接口变化时，可以单独定位、迁移或撤销某项功能。
+
+## 12. Git 提交关系
+
+```text
+cesium-native
+  53523e929  Add custom projections and terrain processing
+  838a2b349  Add option to ignore tileset transforms
+```
+
+外层仓库只记录 native 子模块 commit。必须先确保 native commit 已经推送到
+`yuxueliyuxl/cesium-native`，再推送对应的 cesium-unreal commit，否则其他机器
+无法初始化该子模块版本。
